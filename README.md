@@ -26,7 +26,19 @@ pip install -e .
 
 ## Add to Antigravity
 
-In Antigravity, open **Settings → MCP Servers** and add:
+### 1. Locate your configuration file
+
+Open your Antigravity configuration file. It is usually found at:
+
+```
+~/.gemini/antigravity/mcp_config.json
+```
+
+Or go to **Settings → MCP Servers** inside Antigravity.
+
+### 2. Add the server
+
+Append the following to your `mcpServers` object:
 
 ```json
 {
@@ -39,13 +51,55 @@ In Antigravity, open **Settings → MCP Servers** and add:
 }
 ```
 
-Or copy the included `.antigravity/mcp.json` — Antigravity will pick it up automatically when you open this project folder.
+### 3. Reload
 
-Once connected, Antigravity discovers all tools automatically. You can then ask it things like:
+Restart Antigravity or trigger **Refresh MCP Servers** to discover the new tools.
+
+### Verify
+
+Ask the agent:
+
+> "List the tools available from antigravity-nb"
+> "Open a notebook and run the first cell"
+
+Once connected, Antigravity discovers all 10 tools automatically. You can then ask it things like:
 
 > "Run the preprocess stage in pipeline.ipynb and show me the outputs"
 > "Edit cell 2 in analysis.ipynb to use pandas instead of a plain list"
 > "Run all cells in notebook.ipynb and tell me if any failed"
+
+## Troubleshooting
+
+### Kernel not found / ModuleNotFoundError
+
+If you see `ModuleNotFoundError` when running a cell, the notebook is executing in a kernel that doesn't have your packages installed. Check available kernels and install one that matches your environment:
+
+```bash
+# List installed kernels
+jupyter kernelspec list
+
+# Install the current environment as a kernel
+python -m ipykernel install --user --name myenv
+```
+
+Then pass `kernel_name` when calling `run_cell` or `run_range`, or restart Antigravity and select the correct kernel.
+
+### Pipeline tags
+
+To use the `run_pipeline` tool, tag your cells in the notebook metadata. In JupyterLab: **View → Cell Toolbar → Tags**, then add a tag like `preprocess`, `train`, or `eval` to each cell.
+
+The agent can then run specific stages in order while maintaining kernel state across them:
+
+> "Run the train and eval stages in model.ipynb"
+
+### Debug logging
+
+Run the server manually and pipe stderr to a file to see all tool calls and errors:
+
+```bash
+antigravity-nb serve-agent --workspace-root . 2>debug.log
+tail -f debug.log
+```
 
 ## Available tools
 
