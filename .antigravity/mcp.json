@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "antigravity-nb": {
+      "command": "antigravity-nb",
+      "args": ["serve-agent", "--workspace-root", "${workspaceFolder}"]
+    }
+  }
+}
