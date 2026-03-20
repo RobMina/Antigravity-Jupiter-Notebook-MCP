@@ -23,7 +23,11 @@ class NotebookToolManager:
         self._contexts: dict[Path, NotebookContext] = {}
 
     def _resolve_notebook(self, notebook_path: str | Path) -> Path:
-        raw = Path(notebook_path)
+        s_path = str(notebook_path)
+        if "${workspaceFolder}" in s_path:
+            s_path = s_path.replace("${workspaceFolder}", str(self.workspace_root))
+
+        raw = Path(s_path)
         path = raw if raw.is_absolute() else (self.workspace_root / raw)
         resolved = path.resolve()
         if self.workspace_root not in resolved.parents and resolved != self.workspace_root:
