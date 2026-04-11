@@ -27,6 +27,9 @@ def _as_text(source: str | list[str]) -> str:
 class NotebookAdapter:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
+        self.reload()
+
+    def reload(self) -> None:
         if not self.path.exists():
             raise FileNotFoundError(f"Notebook not found: {self.path}")
         with self.path.open("r", encoding="utf-8") as f:
@@ -35,6 +38,12 @@ class NotebookAdapter:
             raise ValueError(f"Not a valid notebook (missing 'cells' key): {self.path}")
         self._original = copy.deepcopy(self.data)
         self._dirty = False
+        self._last_mtime = self.path.stat().st_mtime
+
+    def is_stale(self) -> bool:
+        if not self.path.exists():
+            return False
+        return self.path.stat().st_mtime > self._last_mtime
 
     @property
     def cells(self) -> list[dict[str, Any]]:
@@ -49,8 +58,10 @@ class NotebookAdapter:
         with out_path.open("w", encoding="utf-8") as f:
             json.dump(self.data, f, indent=1, ensure_ascii=False)
             f.write("\n")
-        self._original = copy.deepcopy(self.data)
-        self._dirty = False
+        if out_path.resolve() == self.path.resolve():
+            self._original = copy.deepcopy(self.data)
+            self._dirty = False
+            self._last_mtime = self.path.stat().st_mtime
 
     def checkpoint(self) -> Path:
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -80,7 +91,9 @@ class NotebookAdapter:
         if cell_type not in {"code", "markdown", "raw"}:
             raise ValueError("cell_type must be one of: code, markdown, raw")
 
+        import uuid
         cell: dict[str, Any] = {
+            "id": uuid.uuid4().hex[:8],
             "cell_type": cell_type,
             "metadata": {},
             "source": _as_lines(source),

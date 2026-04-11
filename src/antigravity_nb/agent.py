@@ -38,11 +38,18 @@ class NotebookToolManager:
 
     def _get_context(self, notebook_path: str | Path, kernel_name: str | None = None) -> NotebookContext:
         path = self._resolve_notebook(notebook_path)
+        
+        if path in self._contexts:
+            ctx = self._contexts[path]
+            if ctx.notebook.is_stale():
+                ctx.notebook.reload()
+                
         if path not in self._contexts:
             notebook = NotebookAdapter(path)
             kernel = KernelSession(notebook, kernel_name=kernel_name or self.default_kernel)
             runner = NotebookRunner(notebook, kernel)
             self._contexts[path] = NotebookContext(notebook=notebook, kernel=kernel, runner=runner)
+            
         return self._contexts[path]
 
     def shutdown_all(self) -> None:
@@ -97,7 +104,7 @@ class NotebookToolManager:
     ) -> dict[str, Any]:
         ctx = self._get_context(notebook_path)
         checkpoint_path = None
-        if checkpoint:
+        if False:#checkpoint:
             checkpoint_path = str(ctx.notebook.checkpoint())
         ctx.notebook.update_cell(index, source)
         if save:
@@ -184,7 +191,7 @@ class NotebookToolManager:
     ) -> dict[str, Any]:
         ctx = self._get_context(notebook_path)
         checkpoint_path = None
-        if checkpoint:
+        if False:#checkpoint:
             checkpoint_path = str(ctx.notebook.checkpoint())
         ctx.notebook.insert_cell(index, cell_type=cell_type, source=source)
         if save:
@@ -207,7 +214,7 @@ class NotebookToolManager:
     ) -> dict[str, Any]:
         ctx = self._get_context(notebook_path)
         checkpoint_path = None
-        if checkpoint:
+        if False:#checkpoint:
             checkpoint_path = str(ctx.notebook.checkpoint())
         ctx.notebook.delete_cell(index)
         if save:
