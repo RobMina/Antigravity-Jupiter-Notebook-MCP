@@ -23,11 +23,55 @@ class KernelSession:
         self.km: KernelManager | None = None
         self.kc = None
 
+    def _discover_venv(self) -> Path | None:
+        import os
+        from pathlib import Path
+        
+        current = self.notebook.path.parent.resolve()
+        while True:
+            venv_path = current / ".venv"
+            if venv_path.is_dir():
+                return venv_path
+            if current.parent == current:
+                break
+            current = current.parent
+        return None
+
     def start(self) -> None:
         if self.km is not None:
             return
+            
+        import os
+        venv = self._discover_venv()
+        env = os.environ.copy()
+        if venv:
+            # Add venv/share/jupyter to JUPYTER_PATH
+            # We set it in os.environ because KernelManager/KernelSpecManager reads it during init
+            jupyter_path = venv / "share" / "jupyter"
+            if jupyter_path.exists():
+                old_jpath = os.environ.get("JUPYTER_PATH", "")
+                new_jpath = str(jupyter_path) + (os.pathsep + old_jpath if old_jpath else "")
+                os.environ["JUPYTER_PATH"] = new_jpath
+                env["JUPYTER_PATH"] = new_jpath
+            
+            # Add venv/bin to PATH so jupyter can find the kernel executables
+            venv_bin = venv / "bin"
+            if venv_bin.exists():
+                env["PATH"] = str(venv_bin) + os.pathsep + env.get("PATH", "")
+
         self.km = KernelManager(kernel_name=self.kernel_name)
-        self.km.start_kernel()
+        
+        # Surgically update the kernel's argv to use the absolute path of the discovered venv's python
+        if venv and self.km.kernel_spec:
+            spec = self.km.kernel_spec
+            if spec.argv and (spec.argv[0] == "python" or spec.argv[0] == "python3"):
+                python_exe = venv / "bin" / "python"
+                if not python_exe.exists():
+                    python_exe = venv / "bin" / "python3"
+                if python_exe.exists():
+                    spec.argv[0] = str(python_exe)
+
+        self.km.start_kernel(env=env)
         self.kc = self.km.blocking_client()
         self.kc.start_channels()
         try:
