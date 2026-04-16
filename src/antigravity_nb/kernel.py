@@ -71,7 +71,7 @@ class KernelSession:
                 if python_exe.exists():
                     spec.argv[0] = str(python_exe)
 
-        self.km.start_kernel(env=env)
+        self.km.start_kernel(env=env, cwd=str(self.notebook.path.parent.resolve()))
         self.kc = self.km.blocking_client()
         self.kc.start_channels()
         try:
