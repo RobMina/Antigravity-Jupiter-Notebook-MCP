@@ -4,15 +4,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .kernel import KernelSession
+from .kernel import AttachedKernelSession, KernelSession, find_running_kernels
 from .notebook import NotebookAdapter
 from .runner import NotebookRunner
+
+_AnyKernel = KernelSession | AttachedKernelSession
 
 
 @dataclass
 class NotebookContext:
     notebook: NotebookAdapter
-    kernel: KernelSession
+    kernel: _AnyKernel
     runner: NotebookRunner
 
 
@@ -51,6 +53,61 @@ class NotebookToolManager:
             self._contexts[path] = NotebookContext(notebook=notebook, kernel=kernel, runner=runner)
             
         return self._contexts[path]
+
+    def list_kernels(self) -> dict[str, Any]:
+        """Return all running Jupyter kernels found in the runtime directory."""
+        kernels = find_running_kernels()
+        for k in kernels:
+            k.pop("last_modified", None)  # not JSON-serializable as-is
+        return {"kernels": kernels}
+
+    def attach_kernel(self, notebook_path: str, kernel_id: str) -> dict[str, Any]:
+        """Wire a notebook context to an existing running kernel by its ID.
+
+        After this call, run_cell / run_range will execute on the IDE's kernel,
+        sharing all in-memory state (variables, imports, etc.).
+        """
+        path = self._resolve_notebook(notebook_path)
+        kernels = find_running_kernels()
+        match = next((k for k in kernels if k["kernel_id"] == kernel_id), None)
+        if match is None:
+            available = [k["kernel_id"] for k in kernels]
+            raise ValueError(
+                f"No running kernel with id {kernel_id!r}. "
+                f"Call list_kernels to see what is available. "
+                f"Found: {available}"
+            )
+
+        if path in self._contexts:
+            old_kernel = self._contexts[path].kernel
+            already_attached = (
+                isinstance(old_kernel, AttachedKernelSession)
+                and old_kernel.kernel_id == kernel_id
+            )
+            if not already_attached:
+                old_kernel.shutdown()
+                notebook = self._contexts[path].notebook
+                attached = AttachedKernelSession(match["connection_file"], notebook)
+                self._contexts[path] = NotebookContext(
+                    notebook=notebook,
+                    kernel=attached,
+                    runner=NotebookRunner(notebook, attached),
+                )
+        else:
+            notebook = NotebookAdapter(path)
+            attached = AttachedKernelSession(match["connection_file"], notebook)
+            self._contexts[path] = NotebookContext(
+                notebook=notebook,
+                kernel=attached,
+                runner=NotebookRunner(notebook, attached),
+            )
+
+        return {
+            "path": str(path),
+            "kernel_id": kernel_id,
+            "connection_file": match["connection_file"],
+            "status": "attached",
+        }
 
     def shutdown_all(self) -> None:
         for ctx in self._contexts.values():

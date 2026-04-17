@@ -1,12 +1,39 @@
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from pathlib import Path
 from queue import Empty
 from typing import Any
 
 from jupyter_client import KernelManager
 
 from .notebook import NotebookAdapter
+
+
+def find_running_kernels() -> list[dict[str, Any]]:
+    """Return metadata for all running kernels found in the Jupyter runtime directory."""
+    from jupyter_core.paths import jupyter_runtime_dir
+    runtime_dir = Path(jupyter_runtime_dir())
+    if not runtime_dir.exists():
+        return []
+    kernels: list[dict[str, Any]] = []
+    for cf in sorted(runtime_dir.glob("kernel-*.json"), key=os.path.getmtime, reverse=True):
+        try:
+            data = json.loads(cf.read_text())
+            kernel_id = cf.stem.removeprefix("kernel-")
+            kernels.append({
+                "kernel_id": kernel_id,
+                "connection_file": str(cf),
+                "last_modified": cf.stat().st_mtime,
+                "transport": data.get("transport", "tcp"),
+                "ip": data.get("ip", ""),
+                "kernel_name": data.get("kernel_name", ""),
+            })
+        except Exception:
+            pass
+    return kernels
 
 
 @dataclass
@@ -154,6 +181,112 @@ class KernelSession:
                         "text": content.get("text", ""),
                     }
                 )
+            elif msg_type in {"display_data", "execute_result"}:
+                payload: dict[str, Any] = {
+                    "output_type": msg_type,
+                    "data": content.get("data", {}),
+                    "metadata": content.get("metadata", {}),
+                }
+                if msg_type == "execute_result":
+                    payload["execution_count"] = content.get("execution_count")
+                    execution_count = content.get("execution_count", execution_count)
+                outputs.append(payload)
+            elif msg_type == "error":
+                error_payload = {
+                    "output_type": "error",
+                    "ename": content.get("ename", ""),
+                    "evalue": content.get("evalue", ""),
+                    "traceback": content.get("traceback", []),
+                }
+                outputs.append(error_payload)
+
+        self.notebook.set_cell_outputs(index, outputs, execution_count)
+        return ExecutionResult(outputs=outputs, execution_count=execution_count, error=error_payload)
+
+
+class AttachedKernelSession:
+    """Attaches to an already-running Jupyter kernel via its ZMQ connection file.
+
+    Use this to share the kernel that VSCode (or any other client) has already started.
+    Does NOT start or stop the kernel — only the original owner should do that.
+    """
+
+    def __init__(self, connection_file: str | Path, notebook: NotebookAdapter) -> None:
+        self.connection_file = str(connection_file)
+        self.notebook = notebook
+        self.kc = None
+        self._kernel_id: str = Path(connection_file).stem.removeprefix("kernel-")
+
+    @property
+    def kernel_id(self) -> str:
+        return self._kernel_id
+
+    def start(self) -> None:
+        if self.kc is not None:
+            return
+        from jupyter_client import BlockingKernelClient
+        kc = BlockingKernelClient()
+        kc.load_connection_file(self.connection_file)
+        kc.start_channels()
+        try:
+            kc.wait_for_ready(timeout=10)
+        except RuntimeError as exc:
+            kc.stop_channels()
+            raise RuntimeError(
+                f"Cannot attach to kernel {self._kernel_id}: {exc}. "
+                "Is the kernel still running in the IDE?"
+            ) from exc
+        self.kc = kc
+
+    def restart(self) -> None:
+        raise RuntimeError(
+            "Cannot restart an attached kernel — restart it from the IDE and then call attach_kernel again."
+        )
+
+    def shutdown(self) -> None:
+        if self.kc is not None:
+            try:
+                self.kc.stop_channels()
+            except Exception:
+                pass
+            self.kc = None
+
+    def execute_cell(self, index: int, timeout: int = 120) -> ExecutionResult:
+        cell = self.notebook.get_cell(index)
+        if cell.get("cell_type") != "code":
+            raise ValueError(f"Cell {index} is not a code cell")
+        if self.kc is None:
+            self.start()
+        assert self.kc is not None
+
+        source = self.notebook.get_cell_source(index)
+        msg_id = self.kc.execute(source, store_history=True, allow_stdin=False)
+        outputs: list[dict[str, Any]] = []
+        execution_count: int | None = None
+        error_payload: dict[str, Any] | None = None
+
+        while True:
+            try:
+                msg = self.kc.get_iopub_msg(timeout=timeout)
+            except Empty as exc:
+                raise TimeoutError(f"Timed out while executing cell {index}") from exc
+
+            if msg["parent_header"].get("msg_id") != msg_id:
+                continue
+
+            msg_type = msg["msg_type"]
+            content = msg["content"]
+
+            if msg_type == "status" and content.get("execution_state") == "idle":
+                break
+            if msg_type == "execute_input":
+                execution_count = content.get("execution_count")
+            elif msg_type == "stream":
+                outputs.append({
+                    "output_type": "stream",
+                    "name": content.get("name", "stdout"),
+                    "text": content.get("text", ""),
+                })
             elif msg_type in {"display_data", "execute_result"}:
                 payload: dict[str, Any] = {
                     "output_type": msg_type,

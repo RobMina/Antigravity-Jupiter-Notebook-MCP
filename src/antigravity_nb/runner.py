@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 from .kernel import ExecutionResult, KernelSession
 from .notebook import NotebookAdapter
+
+if TYPE_CHECKING:
+    from .kernel import AttachedKernelSession
 
 
 @dataclass
@@ -14,7 +17,7 @@ class RunSummary:
 
 
 class NotebookRunner:
-    def __init__(self, notebook: NotebookAdapter, kernel: KernelSession) -> None:
+    def __init__(self, notebook: NotebookAdapter, kernel: KernelSession | AttachedKernelSession) -> None:
         self.notebook = notebook
         self.kernel = kernel
 

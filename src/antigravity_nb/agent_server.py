@@ -158,6 +158,34 @@ def _tool_schemas() -> list[dict[str, Any]]:
                 "required": ["notebook_path"],
             },
         },
+        {
+            "name": "list_kernels",
+            "description": (
+                "List all running Jupyter kernels found on this machine. "
+                "Returns kernel IDs and connection file paths. "
+                "Use the kernel_id with attach_kernel to share the IDE's kernel."
+            ),
+            "inputSchema": {"type": "object", "properties": {}},
+        },
+        {
+            "name": "attach_kernel",
+            "description": (
+                "Attach a notebook to an already-running Jupyter kernel by its ID "
+                "(obtained from list_kernels). After attaching, run_cell and run_range "
+                "will execute on that kernel, sharing all variables and state with the IDE session."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "notebook_path": {"type": "string"},
+                    "kernel_id": {
+                        "type": "string",
+                        "description": "The kernel_id from list_kernels output.",
+                    },
+                },
+                "required": ["notebook_path", "kernel_id"],
+            },
+        },
     ]
 
 
@@ -218,6 +246,10 @@ class StdioToolServer:
                 kernel_name=a.get("kernel_name"),
             ),
             "restart_kernel": lambda a: self.manager.restart_kernel(a["notebook_path"]),
+            "list_kernels": lambda _a: self.manager.list_kernels(),
+            "attach_kernel": lambda a: self.manager.attach_kernel(
+                a["notebook_path"], a["kernel_id"]
+            ),
         }
 
     def _ok(self, req_id: Any, result: Any) -> dict[str, Any]:
